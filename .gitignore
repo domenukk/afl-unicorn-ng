@@ -1,4 +1,5 @@
 .DS_Store
+.fuse_*
 *.swp
 *.d
 *.o

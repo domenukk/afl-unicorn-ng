@@ -31,6 +31,8 @@
 #include <string.h>
 #include "unicorn/platform.h"
 
+#include "../afl-unicorn-translate-inl.h"
+
 #include "config.h"
 
 #include "qemu-common.h"
@@ -177,6 +179,7 @@ static int cpu_gen_code(CPUArchState *env, TranslationBlock *tb, int *gen_code_s
 #endif
     tcg_func_start(s);
 
+    afl_gen_trace(tb->pc);
     gen_intermediate_code(env, tb);
 
     // Unicorn: when tracing block, patch block size operand for callback
@@ -403,10 +406,16 @@ static PageDesc *page_find_alloc(struct uc_struct *uc, tb_page_addr_t index, int
 
 #if defined(CONFIG_USER_ONLY)
     /* We can't use g_malloc because it may recurse into a locked mutex. */
+    /* This was changed for unicorn-afl to bail out semi-gracefully if out of memory. */
 # define ALLOC(P, SIZE)                                 \
     do {                                                \
-        P = mmap(NULL, SIZE, PROT_READ | PROT_WRITE,    \
+        void* _tmp = mmap(NULL, SIZE, PROT_READ | PROT_WRITE,    \
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);   \
+        if (_tmp == (void*)-1) { \
+            qemu_log(">>> Out of memory for stack, bailing out. <<<\n"); \
+            exit(1); \
+        } \
+        (P) = _tmp; \
     } while (0)
 #else
 # define ALLOC(P, SIZE) \
