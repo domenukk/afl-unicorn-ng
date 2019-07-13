@@ -24,8 +24,10 @@
 
 #include "uc_priv.h"
 
+#if defined(UNICORN_AFL)
 #include "./afl-unicorn-cpu-inl.h"
 static int afl_first_instr = 0;
+#endif 
 
 static tcg_target_ulong cpu_tb_exec(CPUState *cpu, uint8_t *tb_ptr);
 static TranslationBlock *tb_find_slow(CPUArchState *env, target_ulong pc,
@@ -234,7 +236,9 @@ int cpu_exec(struct uc_struct *uc, CPUArchState *env)   // qq
                             next_tb & TB_EXIT_MASK, tb);
                 }
 
+#if defined(UNICORN_AFL)
                 AFL_UNICORN_CPU_SNIPPET2;
+#endif
 
                 /* cpu_interrupt might be called while translating the
                    TB, but before it is linked into a potentially
@@ -374,8 +378,11 @@ static TranslationBlock *tb_find_slow(CPUArchState *env, target_ulong pc,
 not_found:
     /* if no translated code available, then translate it now */
     tb = tb_gen_code(cpu, pc, cs_base, (int)flags, 0);   // qq
-    // There seems to be no chaining in unicorn ever?
-    afl_request_tsl(pc, cs_base, flags, NULL, cpu.tb_exit);
+    
+#if defined(UNICORN_AFL)
+    /* There seems to be no chaining in unicorn ever? :( */
+    afl_request_tsl(pc, cs_base, flags, NULL, 0);
+#endif
 
 found:
     /* Move the last found TB to the head of the list */
