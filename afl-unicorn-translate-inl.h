@@ -29,13 +29,15 @@
 
  */
 
+#include <sys/shm.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include "../../config.h"
 #include "tcg-op.h"
 
 /* Declared in afl-qemu-cpu-inl.h */
 extern unsigned char *afl_area_ptr;
 extern unsigned int afl_inst_rms;
-extern abi_ulong afl_start_code, afl_end_code;
 
 /* Generates TCG code for AFL's tracing instrumentation. */
 static void afl_gen_trace(TCGContext *s, target_ulong cur_loc)

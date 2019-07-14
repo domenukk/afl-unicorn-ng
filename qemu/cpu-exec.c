@@ -25,7 +25,7 @@
 #include "uc_priv.h"
 
 #if defined(UNICORN_AFL)
-#include "./afl-unicorn-cpu-inl.h"
+#include "../afl-unicorn-cpu-inl.h"
 static int afl_first_instr = 0;
 #endif 
 
@@ -381,7 +381,7 @@ not_found:
     
 #if defined(UNICORN_AFL)
     /* There seems to be no chaining in unicorn ever? :( */
-    afl_request_tsl(pc, cs_base, flags, NULL, 0);
+    AFL_UNICORN_CPU_SNIPPET1;
 #endif
 
 found:

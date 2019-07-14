@@ -31,10 +31,6 @@
 #include <string.h>
 #include "unicorn/platform.h"
 
-#if defined(UNICORN_AFL)
-#include "../afl-unicorn-translate-inl.h"
-#endif
-
 #include "config.h"
 
 #include "qemu-common.h"
@@ -180,11 +176,6 @@ static int cpu_gen_code(CPUArchState *env, TranslationBlock *tb, int *gen_code_s
     ti = profile_getclock();
 #endif
     tcg_func_start(s);
-
-#if defined(UNICORN_AFL)
-    /* Inject AFL Instrumentation into the translation block output */
-    afl_gen_trace(s, tb->pc);
-#endif 
 
     gen_intermediate_code(env, tb);
 

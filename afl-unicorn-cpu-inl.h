@@ -44,9 +44,9 @@
    it to translate within its own context, too (this avoids translation
    overhead in the next forked-off copy). */
 
-/* #define AFL_UNICORN_CPU_SNIPPET1 do { \
+#define AFL_UNICORN_CPU_SNIPPET1 do { \
     afl_request_tsl(pc, cs_base, flags); \
-  } while (0) */
+  } while (0)
 
 /* This snippet kicks in when the instruction pointer is positioned at
    _start and does the usual forkserver stuff, not very different from
@@ -58,6 +58,7 @@
       afl_forkserver(env); \
       afl_first_instr = 1; \
     } \
+    afl_maybe_log(tb->pc); \
   } while (0)
 
 /* We use one additional file descriptor to relay "needs translation"
@@ -67,7 +68,7 @@
 
 /* This is equivalent to afl-as.h: */
 
-unsigned char *afl_area_ptr; /* exportet for afl_gen_trace */
+static unsigned char *afl_area_ptr;
 
 /* Set in the child process in forkserver mode: */
 
@@ -76,43 +77,27 @@ static unsigned int afl_forksrv_pid;
 
 /* Instrumentation ratio: */
 
-unsigned int afl_inst_rms = MAP_SIZE; /* Exported for afl_gen_trace */
+static unsigned int afl_inst_rms = MAP_SIZE;
 
 /* Function declarations. */
 
 static void afl_setup(void);
 static void afl_forkserver(CPUArchState*);
+static inline void afl_maybe_log(unsigned long);
 
 static void afl_wait_tsl(CPUArchState*, int);
-static void afl_request_tsl(target_ulong, target_ulong, uint32_t, TranslationBlock*, int);
+static void afl_request_tsl(target_ulong, target_ulong, uint64_t);
 
 static TranslationBlock *tb_find_slow(CPUArchState*, target_ulong,
                                       target_ulong, uint64_t);
 
-/* Data structures passed around by the translate handlers: */
-
-struct afl_tb {
-  target_ulong pc;
-  target_ulong cs_base;
-  uint32_t flags;
-};
+/* Data structure passed around by the translate handlers: */
 
 struct afl_tsl {
-  struct afl_tb tb;
-  char is_chain;
+  target_ulong pc;
+  target_ulong cs_base;
+  uint64_t flags;
 };
-
-struct afl_chain {
-  struct afl_tb last_tb;
-  int tb_exit;
-};
-
-
-/* Some forward decls: */
-
-TranslationBlock *tb_htable_lookup(CPUArchState*, target_ulong, target_ulong, uint32_t);
-static inline TranslationBlock *tb_find(CPUArchState*, TranslationBlock*, int);
-
 
 /*************************
  * ACTUAL IMPLEMENTATION *
@@ -217,6 +202,48 @@ static void afl_forkserver(CPUArchState *env) {
     if (write(FORKSRV_FD + 1, &status, 4) != 4) exit(7);
 
   }
+
+}
+
+
+/* The equivalent of the tuple logging routine from afl-as.h. */
+
+static inline void afl_maybe_log(unsigned long cur_loc) {
+
+  static __thread unsigned long prev_loc;
+
+  // DEBUG
+  //printf("IN AFL_MAYBE_LOG 0x%lx\n", cur_loc);
+
+  // MODIFIED FOR UNICORN MODE -> We want to log all addresses,
+  // so the checks for 'start < addr < end' are removed
+  if(!afl_area_ptr)
+    return;
+
+  // DEBUG
+  //printf("afl_area_ptr = %p\n", afl_area_ptr);
+
+  /* Looks like QEMU always maps to fixed locations, so ASAN is not a
+     concern. Phew. But instruction addresses may be aligned. Let's mangle
+     the value to get something quasi-uniform. */
+
+  cur_loc  = (cur_loc >> 4) ^ (cur_loc << 8);
+  cur_loc &= MAP_SIZE - 1;
+
+  /* Implement probabilistic instrumentation by looking at scrambled block
+     address. This keeps the instrumented locations stable across runs. */
+
+  // DEBUG
+  //printf("afl_inst_rms = 0x%lx\n", afl_inst_rms);
+
+  if (cur_loc >= afl_inst_rms) return;
+
+  // DEBUG
+  //printf("cur_loc = 0x%lx\n", cur_loc);  
+
+  afl_area_ptr[cur_loc ^ prev_loc]++;
+  prev_loc = cur_loc >> 1;
+
 }
 
 
@@ -225,34 +252,21 @@ static void afl_forkserver(CPUArchState *env) {
    we tell the parent to mirror the operation, so that the next fork() has a
    cached copy. */
 
-
-static void afl_request_tsl(target_ulong pc, target_ulong cb, uint32_t flags,
-                            TranslationBlock *last_tb, int tb_exit) {
+static void afl_request_tsl(target_ulong pc, target_ulong cb, uint64_t flags) {
 
   struct afl_tsl t;
-  struct afl_chain c;
 
   if (!afl_fork_child) return;
 
-  t.tb.pc      = pc;
-  t.tb.cs_base = cb;
-  t.tb.flags   = flags;
-  t.is_chain   = (last_tb != NULL);
+  t.pc      = pc;
+  t.cs_base = cb;
+  t.flags   = flags;
 
   if (write(TSL_FD, &t, sizeof(struct afl_tsl)) != sizeof(struct afl_tsl))
     return;
 
-  if (t.is_chain) {
-    c.last_tb.pc      = last_tb->pc;
-    c.last_tb.cs_base = last_tb->cs_base;
-    c.last_tb.flags   = last_tb->flags;
-    c.tb_exit         = tb_exit;
-
-    if (write(TSL_FD, &c, sizeof(struct afl_chain)) != sizeof(struct afl_chain))
-      return;
-  }
-
 }
+
 
 /* This is the other side of the same channel. Since timeouts are handled by
    afl-fuzz simply killing the child, we can just wait until the pipe breaks. */
@@ -260,8 +274,6 @@ static void afl_request_tsl(target_ulong pc, target_ulong cb, uint32_t flags,
 static void afl_wait_tsl(CPUArchState *env, int fd) {
 
   struct afl_tsl t;
-  struct afl_chain c;
-  TranslationBlock *tb, *last_tb;
 
   while (1) {
 
@@ -270,32 +282,9 @@ static void afl_wait_tsl(CPUArchState *env, int fd) {
     if (read(fd, &t, sizeof(struct afl_tsl)) != sizeof(struct afl_tsl))
       break;
 
-    tb = tb_htable_lookup(env, t.tb.pc, t.tb.cs_base, t.tb.flags);
-
-    if(!tb) {
-      mmap_lock();
-      tb_lock();
-      tb = tb_gen_code(env, t.tb.pc, t.tb.cs_base, t.tb.flags, 0);
-      mmap_unlock();
-      tb_unlock();
-    }
-
-    if (t.is_chain) {
-      if (read(fd, &c, sizeof(struct afl_chain)) != sizeof(struct afl_chain))
-        break;
-
-      last_tb = tb_htable_lookup(env, c.last_tb.pc, c.last_tb.cs_base,
-                                 c.last_tb.flags);
-      if (last_tb) {
-        tb_lock();
-        if (!tb->invalid) {
-          tb_add_jump(last_tb, c.tb_exit, tb);
-        }
-        tb_unlock();
-      }
-    }
-
+    tb_find_slow(env, t.pc, t.cs_base, t.flags);
   }
 
   close(fd);
 }
+
