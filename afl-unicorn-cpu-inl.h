@@ -53,7 +53,7 @@
    regular instrumentation injected via afl-as.h. */
 
 #define AFL_UNICORN_CPU_SNIPPET2 do { \
-    if(afl_first_instr == 0) { \
+    if(unlikely(afl_first_instr == 0)) { \
       afl_setup(); \
       afl_forkserver(env); \
       afl_first_instr = 1; \
