@@ -53,6 +53,7 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
     /* Reset the temp count so that we can identify leaks */
     tcg_clear_temp_count();
 
+    //TODO: why did I put this here: afl_gen_trace(tcg_ctx, tb->pc)
     /* Unicorn: early check to see if the address of this block is
      * the "run until" address. */
     if (tb->pc == cpu->uc->addr_end) {

@@ -32,6 +32,10 @@
 
 #include "uc_priv.h"
 
+#include "../../patches/afl-unicorn-cpu-inl.h"
+
+static int afl_first_insn = 0;
+
 /* Execute a TB, and fix up the CPU state afterwards if necessary */
 static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
 {
@@ -41,6 +45,8 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
     TranslationBlock *last_tb;
     int tb_exit;
     uint8_t *tb_ptr = itb->tc.ptr;
+
+    AFL_QEMU_CPU_SNIPPET2;
 
     ret = tcg_qemu_tb_exec(env, tb_ptr);
     cpu->can_do_io = 1;
@@ -211,6 +217,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     TranslationBlock *tb;
     target_ulong cs_base, pc;
     uint32_t flags;
+    bool was_translated = false, was_chained = false;
     bool acquired_tb_lock = false;
 
     tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
@@ -226,6 +233,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         if (likely(tb == NULL)) {
             /* if no translated code available, then translate it now */
             tb = tb_gen_code(cpu, pc, cs_base, flags, cf_mask);
+            was_translated = true;
         }
 
         mmap_unlock();
@@ -253,11 +261,15 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
             cpu->tb_flushed = false;
         } else if (!(tb_cflags(tb) & CF_INVALID)) {
             tb_add_jump(last_tb, tb_exit, tb);
+            was_chained = true;
         }
     }
     if (acquired_tb_lock) {
         // Unicorn: commented out
         //tb_unlock();
+    }
+    if (was_translated || was_chained) {
+        afl_request_tsl(pc, cs_base, flags, cf_mask, was_chained ? last_tb : NULL, tb_exit);
     }
     return tb;
 }

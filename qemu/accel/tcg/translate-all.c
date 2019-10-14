@@ -61,6 +61,8 @@
 
 #include "uc_priv.h"
 
+#include "../../../../patches/afl-unicorn-translate-inl.h"
+
 /* #define DEBUG_TB_INVALIDATE */
 /* #define DEBUG_TB_FLUSH */
 /* make various TB consistency checks */
@@ -1374,6 +1376,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tcg_func_start(tcg_ctx);
 
     tcg_ctx->cpu = env_cpu(env);
+    afl_gen_trace(env->uc, pc);
     gen_intermediate_code(cpu, tb, max_insns);
     tcg_ctx->cpu = NULL;
 

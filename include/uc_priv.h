@@ -284,6 +284,14 @@ struct uc_struct {
     // util/cacheinfo.c
     int qemu_icache_linesize;
     int qemu_dcache_linesize;
+
+    // AFL++-Unicorn Mode
+    unsigned char *afl_area_ptr;
+    int afl_compcov_level;
+    unsigned int afl_inst_rms; 
+    int afl_forkserver_installed; // 0 if no forserver (yet)
+    int afl_forkserver_pid; 
+    void *afl_prev_loc; // the last basic block executed
 };
 
 // Metadata stub for the variable-size cpu context used with uc_context_*()
