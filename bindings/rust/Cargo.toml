@@ -1,7 +1,7 @@
 [package]
-name = "unicorn"
+name = "unicornafl"
 version = "0.9.0"
-authors = ["Sébastien Duquette <ekse.0x@gmail.com>"]
+authors = ["Dominik Maier<domenukk@gmail.com>"]
 documentation = "https://docs.rs/unicorn/"
 edition = "2018"
 include = [
@@ -13,8 +13,8 @@ include = [
 ]
 license = "GPL-2.0"
 readme = "README.md"
-repository = "https://github.com/ekse/unicorn-rs"
-description = "Rust bindings for the unicorn emulator"
+repository = "https://github.com/domenukk/unicorn"
+description = "Rust bindings for the unicorn emulator, AFL edition - based on unicorn-rs"
 
 [dependencies]
 bitflags = "1.0"
