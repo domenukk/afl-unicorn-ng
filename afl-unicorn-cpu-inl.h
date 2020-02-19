@@ -171,10 +171,12 @@ static inline uc_afl_ret afl_forkserver(CPUArchState* env) {
 
   if (!env->uc->afl_area_ptr) return UC_AFL_RET_NO_AFL;
 
-  /* Phone home and tell the parent that we're OK. If parent isn't there,
-     assume we're not running in forkserver mode and just execute program. */
+  /* Phone home and tell the parent that we're OK. 
+     If parent isn't there, assume we're not running in forkserver mode 
+     and just execute program - and still trace (for afl-showmap) 
+  */
 
-  if (write(FORKSRV_FD + 1, tmp, 4) != 4) return UC_AFL_RET_NO_AFL;
+  bool parent_forkserver = (write(FORKSRV_FD + 1, tmp, 4) == 4);
 
   void (*old_sigchld_handler)(int) = signal(SIGCHLD, SIG_DFL);
 
@@ -183,9 +185,13 @@ static inline uc_afl_ret afl_forkserver(CPUArchState* env) {
     uint32_t was_killed;
     int      status;
 
-    /* Wait for parent by reading from the pipe. Abort if read fails. */
+    /* Wait for parent by reading from the pipe. Abort if read fails and we are in parent_forkserver mode. */
 
-    if (read(FORKSRV_FD, &was_killed, 4) != 4) return UC_AFL_RET_FINISHED;
+    if (read(FORKSRV_FD, &was_killed, 4) != 4) {
+      if (likely(parent_forkserver)) {
+        return UC_AFL_RET_FINISHED;
+      }
+    }
 
     /* If we stopped the child in persistent mode, but there was a race
     condition and afl-fuzz already issued SIGKILL, write off the old
@@ -295,7 +301,9 @@ static inline uc_afl_ret afl_forkserver(CPUArchState* env) {
     /* In parent process: write PID to AFL. */
 
     if (write(FORKSRV_FD + 1, &child_pid, 4) != 4) {
-      return UC_AFL_RET_FINISHED;
+      if (likely(parent_forkserver)) {
+        return UC_AFL_RET_FINISHED;
+      }
     }
 
     /* Collect translation requests until child finishes a run or dies */
@@ -326,6 +334,20 @@ static inline uc_afl_ret afl_forkserver(CPUArchState* env) {
 
       }
 
+    }
+
+    if (unlikely(!parent_forkserver)) {
+      /* No AFL is waiting for us upstream... 
+      This is only ever the case for cornercases like afl-showmap with a single input file. */
+      if WIFSIGNALED(status) {
+#if defined(AFL_DEBUG)
+        printf("No forkserver in parent and child died. Aborting.");
+        flush();
+#endif
+        abort();
+      } else {
+        exit(status);
+      }
     }
 
     /* Relay wait status to AFL pipe, then loop back. */
